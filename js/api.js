@@ -14,15 +14,16 @@ function parseAiText(text) {
   }
 }
 
-async function callOpenAI(apiKey, prompt) {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+async function callChatCompletions(apiKey, baseUrl, model, prompt, labelForErrors) {
+  const url = `${baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model,
       messages: [
         {
           role: "system",
@@ -33,7 +34,11 @@ async function callOpenAI(apiKey, prompt) {
       temperature: 0.3
     })
   });
-  if (!res.ok) throw new Error("OpenAI API недоступен");
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    const hint = errText ? ` (${errText.slice(0, 160)})` : "";
+    throw new Error(`${labelForErrors} недоступен${hint}`);
+  }
   const data = await res.json();
   return data.choices?.[0]?.message?.content ?? "";
 }
@@ -64,9 +69,26 @@ export async function analyzeHeadlines({ provider, apiKey, headlines, topic = nu
     headlines.map((h, i) => `${i + 1}. ${h}`).join("\n")
   ].join("\n");
 
-  const raw = provider === "huggingface"
-    ? await callHuggingFace(apiKey, prompt)
-    : await callOpenAI(apiKey, prompt);
+  let raw;
+  if (provider === "huggingface") {
+    raw = await callHuggingFace(apiKey, prompt);
+  } else if (provider === "deepseek") {
+    raw = await callChatCompletions(
+      apiKey,
+      "https://api.deepseek.com",
+      "deepseek-chat",
+      prompt,
+      "DeepSeek API"
+    );
+  } else {
+    raw = await callChatCompletions(
+      apiKey,
+      "https://api.openai.com",
+      "gpt-4o-mini",
+      prompt,
+      "OpenAI API"
+    );
+  }
 
   return parseAiText(raw);
 }
