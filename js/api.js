@@ -1,6 +1,27 @@
-// Браузерный fetch на api.deepseek.com / api.openai.com без своего backend
+// Браузерный fetch на внешние API без своего backend
 // блокируется CORS → «Failed to fetch». Обходим тем же приёмом, что и для RSS.
 const CHAT_CORS_PROXY = "https://corsproxy.io/?url=";
+
+function formatProviderHttpError(label, status, bodyText) {
+  const short = (bodyText || "").trim().slice(0, 400);
+  let apiMsg = "";
+  try {
+    const j = JSON.parse(short);
+    apiMsg = j.error?.message || j.message || "";
+  } catch {
+    // ignore
+  }
+  const lower = apiMsg.toLowerCase();
+  if (lower.includes("insufficient balance")) {
+    return `${label}: на счёте недостаточно средств. Пополните баланс в кабинете провайдера API.`;
+  }
+  if (lower.includes("incorrect api key") || lower.includes("invalid api key")) {
+    return `${label}: неверный или отозванный API-ключ.`;
+  }
+  if (apiMsg) return `${label}: ${apiMsg}`;
+  if (short) return `${label} (${status}): ${short}`;
+  return `${label} недоступен (HTTP ${status}).`;
+}
 
 function parseAiText(text) {
   const fallback = {
@@ -49,8 +70,7 @@ async function callChatCompletions(apiKey, baseUrl, model, prompt, labelForError
   }
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
-    const hint = errText ? ` (${errText.slice(0, 160)})` : "";
-    throw new Error(`${labelForErrors} недоступен${hint}`);
+    throw new Error(formatProviderHttpError(labelForErrors.replace(" API", ""), res.status, errText));
   }
   const data = await res.json();
   return data.choices?.[0]?.message?.content ?? "";
@@ -92,6 +112,14 @@ export async function analyzeHeadlines({ provider, apiKey, headlines, topic = nu
       "deepseek-chat",
       prompt,
       "DeepSeek API"
+    );
+  } else if (provider === "groq") {
+    raw = await callChatCompletions(
+      apiKey,
+      "https://api.groq.com/openai",
+      "llama-3.3-70b-versatile",
+      prompt,
+      "Groq API"
     );
   } else {
     raw = await callChatCompletions(
