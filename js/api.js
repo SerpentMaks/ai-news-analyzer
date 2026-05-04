@@ -1,3 +1,7 @@
+// Браузерный fetch на api.deepseek.com / api.openai.com без своего backend
+// блокируется CORS → «Failed to fetch». Обходим тем же приёмом, что и для RSS.
+const CHAT_CORS_PROXY = "https://corsproxy.io/?url=";
+
 function parseAiText(text) {
   const fallback = {
     summary: text.slice(0, 300),
@@ -15,25 +19,34 @@ function parseAiText(text) {
 }
 
 async function callChatCompletions(apiKey, baseUrl, model, prompt, labelForErrors) {
-  const url = `${baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: "system",
-          content: "Ты анализируешь новости и возвращаешь только JSON."
-        },
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.3
-    })
-  });
+  const targetUrl = `${baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
+  const fetchUrl = CHAT_CORS_PROXY + encodeURIComponent(targetUrl);
+  let res;
+  try {
+    res = await fetch(fetchUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: "Ты анализируешь новости и возвращаешь только JSON."
+          },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.3
+      })
+    });
+  } catch (e) {
+    const msg = e instanceof TypeError ? e.message : String(e);
+    throw new Error(
+      `Запрос к ИИ не прошёл (${msg}). Проверьте интернет или попробуйте позже.`
+    );
+  }
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     const hint = errText ? ` (${errText.slice(0, 160)})` : "";
